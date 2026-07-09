@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: "Branch/tag/commit của 187J3X1-114514/superresolution để checkout"
+        description: "Branch/tag/commit của 187J3X1-114514/superresolution để checkout (native/cpp nằm ở nhánh dev, KHÔNG phải main)"
         required: false
-        default: "main"
+        default: "dev"
 
 jobs:
   build-android-native:
