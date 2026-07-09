@@ -1,0 +1,91 @@
+name: Build SRNativeMain for Android (arm64-v8a)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Branch/tag/commit của 187J3X1-114514/superresolution để checkout"
+        required: false
+        default: "main"
+
+jobs:
+  build-android-native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upstream SuperResolution source (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: 187J3X1-114514/superresolution
+          ref: ${{ inputs.upstream_ref }}
+          path: upstream
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Run init.py to fetch glslang extra sources
+        working-directory: upstream/native/cpp
+        run: python3 init.py
+
+      - name: Verify submodule contents are populated (freetype / glslang-sr)
+        run: |
+          echo "=== freetype ==="
+          ls -la upstream/native/cpp/SRNativeMain/third_party/freetype | head -20
+          echo "=== glslang-sr ==="
+          ls -la upstream/native/cpp/SRNativeMain/third_party/glslang | head -20
+          FT_COUNT=$(find upstream/native/cpp/SRNativeMain/third_party/freetype -type f | wc -l)
+          GLSLANG_COUNT=$(find upstream/native/cpp/SRNativeMain/third_party/glslang -type f | wc -l)
+          if [ "$FT_COUNT" -eq 0 ] || [ "$GLSLANG_COUNT" -eq 0 ]; then
+            echo "::error::Submodule trống — freetype ($FT_COUNT files) hoặc glslang ($GLSLANG_COUNT files). Build sẽ fail."
+            exit 1
+          fi
+
+      - name: Setup Android NDK r27c
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      - name: Install CMake + Ninja
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      # Chỉ build SRNativeMain (module JNI/glslang core).
+      # FSR/XeSS/DLSS bị tắt vì SDK của chúng (FidelityFX/XeSS/DLSS) không có
+      # toolchain Android — đúng như build_android.ps1 gốc của tác giả đã làm
+      # (-DSR_FSR=OFF -DSR_XESS=OFF -DSR_DLSS=OFF).
+      - name: Configure CMake for Android arm64-v8a
+        working-directory: upstream/native/cpp
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_static \
+            -DANDROID_TOOLCHAIN=clang \
+            -DANDROID_ARM_MODE=arm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DSR_FSR=OFF -DSR_XESS=OFF -DSR_DLSS=OFF
+
+      - name: Build
+        working-directory: upstream/native/cpp
+        run: cmake --build build --config Release -j"$(nproc)"
+
+      - name: Locate produced .so
+        run: |
+          echo "=== Toàn bộ .so tìm được ==="
+          find upstream/native/cpp/output upstream/native/cpp/build -iname "*.so" -print 2>/dev/null || true
+
+      - name: Upload build output and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-v8a-native-build
+          path: |
+            upstream/native/cpp/output/**
+            upstream/native/cpp/build/CMakeCache.txt
+            upstream/native/cpp/build/CMakeFiles/CMakeError.log
+            upstream/native/cpp/build/CMakeFiles/CMakeOutput.log
+          if-no-files-found: warn
