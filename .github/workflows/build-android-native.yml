@@ -43,7 +43,20 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
-          local-cache: true
+          local-cache: false
+
+      - name: Verify NDK compiler exists (guards against corrupted cache)
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          CLANGXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          if [ ! -x "$CLANGXX" ]; then
+            echo "::error::Không tìm thấy clang++ tại $CLANGXX — NDK setup có thể bị lỗi/cache hỏng."
+            ls -la "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/" 2>&1 || echo "Thư mục bin không tồn tại"
+            exit 1
+          fi
+          echo "OK: $CLANGXX tồn tại"
+          "$CLANGXX" --version
 
       - name: Install CMake + Ninja
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
