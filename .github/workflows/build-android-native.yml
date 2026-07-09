@@ -48,6 +48,31 @@ jobs:
       - name: Install CMake + Ninja
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
 
+      # BUG ĐÃ XÁC NHẬN (run #1, 2026-07-09): SRNativeMain/src/sr_api.cpp chỉ có
+      # nhánh #ifdef ON_WIN64 / #elif defined(ON_LINUX64) khi load dynamic library
+      # (LoadLibraryW/dlopen) và resolve getProviders/getProvidersCount qua
+      # GetProcAddress/dlsym. Không có nhánh ON_ANDROID -> compile fail với lỗi
+      # "use of undeclared identifier 'getProviders'" ở dòng dùng biến này.
+      # Vì Android dùng cùng dlopen/dlsym/dlclose (POSIX) như Linux, patch tạm thời
+      # gộp ON_ANDROID vào chung nhánh #elif defined(ON_LINUX64). Đây là patch tại
+      # CI, không sửa trực tiếp source trên GitHub — an toàn, không ảnh hưởng nhánh
+      # dev gốc của tác giả.
+      - name: Patch sr_api.cpp — add ON_ANDROID branch (reuses Linux dlopen/dlsym path)
+        run: |
+          set -x
+          FILE="upstream/native/cpp/SRNativeMain/src/sr_api.cpp"
+          BEFORE=$(grep -c "elif defined(ON_LINUX64)" "$FILE")
+          sed -i 's/#elif defined(ON_LINUX64)/#elif defined(ON_LINUX64) || defined(ON_ANDROID)/g' "$FILE"
+          AFTER=$(grep -c "ON_LINUX64) || defined(ON_ANDROID)" "$FILE")
+          echo "Số vị trí #elif ON_LINUX64 tìm thấy trước patch: $BEFORE"
+          echo "Số vị trí đã patch thành công: $AFTER"
+          if [ "$BEFORE" -eq 0 ] || [ "$AFTER" -ne "$BEFORE" ]; then
+            echo "::error::Patch không khớp số lượng mong đợi — code upstream có thể đã đổi, cần xem lại thủ công."
+            exit 1
+          fi
+          echo "=== Nội dung sau patch (context quanh mỗi vị trí) ==="
+          grep -n "ON_LINUX64\|ON_ANDROID" "$FILE"
+
       # Chỉ build SRNativeMain (module JNI/glslang core).
       # FSR/XeSS/DLSS bị tắt vì SDK của chúng (FidelityFX/XeSS/DLSS) không có
       # toolchain Android — đúng như build_android.ps1 gốc của tác giả đã làm
